@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Editor de Mapas e Solucionador com IA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .grid-cell {
+            width: 25px;
+            height: 25px;
+            border: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .grid-cell.wall { background-color: #4a5568; }
+        .grid-cell.agent { background-color: #4299e1; color: white; }
+        .grid-cell.exit { background-color: #48bb78; color: white; }
+        .grid-cell.path { background-color: #a0aec0; }
+        .grid-cell.visited { background-color: #edf2f7; }
+        .grid-cell.ai-path { background-color: #c084fc; } /* Roxo para o caminho da IA */
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-4xl bg-white p-6 rounded-lg shadow-lg">
+        <h1 class="text-2xl font-bold text-center mb-2">Editor de Mapas e Solucionador com IA</h1>
+        <p class="text-center text-gray-600 mb-4">Crie o seu desafio e veja a IA a resolvê-lo!</p>
+
+        <!-- Controles -->
+        <div class="flex flex-wrap items-center justify-center gap-4 mb-6 p-4 bg-gray-50 rounded-md">
+            <div>
+                <label for="tool" class="font-semibold mr-2">Ferramenta:</label>
+                <select id="tool" class="p-2 border rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
+                    <option value="wall">Parede (W)</option>
+                    <option value="erase">Apagar (Espaço)</option>
+                    <option value="agent">Agente (A)</option>
+                    <option value="exit">Saída (S)</option>
+                </select>
+            </div>
+            <button id="solveBtn" class="bg-blue-600 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-700 transition-colors shadow-md">
+                Encontrar Caminho (Perfeito)
+            </button>
+            <button id="solveAIBtn" class="bg-purple-600 text-white font-bold py-2 px-4 rounded-md hover:bg-purple-700 transition-colors shadow-md">
+                Resolver com IA
+            </button>
+            <button id="resetBtn" class="bg-red-600 text-white font-bold py-2 px-4 rounded-md hover:bg-red-700 transition-colors shadow-md">
+                Limpar Mapa
+            </button>
+        </div>
+
+        <!-- Grid do Mapa -->
+        <div id="grid-container" class="mx-auto overflow-x-auto"></div>
+        
+        <!-- Mensagem de Status -->
+        <p id="status" class="text-center mt-4 font-medium text-gray-700 h-6"></p>
+    </div>
+
+    <script>
+        const GRID_SIZE = 25;
+        const gridContainer = document.getElementById('grid-container');
+        const toolSelect = document.getElementById('tool');
+        const solveBtn = document.getElementById('solveBtn');
+        const solveAIBtn = document.getElementById('solveAIBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const statusEl = document.getElementById('status');
+
+        let grid = [];
+        let agentPos = null;
+        let exitPos = null;
+        let isMouseDown = false;
+        let isSolving = false;
+
+        function initializeGrid() {
+            gridContainer.innerHTML = '';
+            gridContainer.style.gridTemplateColumns = `repeat(${GRID_SIZE}, 25px)`;
+            gridContainer.style.display = 'grid';
+            grid = Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0));
+            agentPos = null;
+            exitPos = null;
+
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('grid-cell');
+                    cell.dataset.r = r;
+                    cell.dataset.c = c;
+                    
+                    cell.addEventListener('mousedown', (e) => {
+                        isMouseDown = true;
+                        paintCell(e.target);
+                    });
+                    cell.addEventListener('mouseover', (e) => {
+                        if (isMouseDown) paintCell(e.target);
+                    });
+                    cell.addEventListener('mouseup', () => isMouseDown = false);
+                    cell.addEventListener('dragstart', (e) => e.preventDefault());
+
+                    gridContainer.appendChild(cell);
+                }
+            }
+        }
+        
+        document.body.addEventListener('mouseup', () => isMouseDown = false);
+
+        function paintCell(cell) {
+            if (isSolving) return;
+            const r = parseInt(cell.dataset.r);
+            const c = parseInt(cell.dataset.c);
+            const tool = toolSelect.value;
+            clearCell(r, c);
+            switch (tool) {
+                case 'wall':
+                    grid[r][c] = 1;
+                    cell.classList.add('wall');
+                    break;
+                case 'agent':
+                    if (agentPos) clearCell(agentPos.r, agentPos.c);
+                    agentPos = { r, c };
+                    cell.classList.add('agent');
+                    cell.textContent = 'A';
+                    break;
+                case 'exit':
+                    if (exitPos) clearCell(exitPos.r, exitPos.c);
+                    exitPos = { r, c };
+                    cell.classList.add('exit');
+                    cell.textContent = 'S';
+                    break;
+            }
+        }
+
+        function clearCell(r, c) {
+            const cell = gridContainer.children[r * GRID_SIZE + c];
+            grid[r][c] = 0;
+            cell.className = 'grid-cell';
+            cell.textContent = '';
+            if (agentPos && agentPos.r === r && agentPos.c === c) agentPos = null;
+            if (exitPos && exitPos.r === r && exitPos.c === c) exitPos = null;
+        }
+
+        function clearVisualization() {
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    const cell = gridContainer.children[r * GRID_SIZE + c];
+                    cell.classList.remove('path', 'visited', 'ai-path');
+                }
+            }
+        }
+
+        async function solveMaze() {
+            if (!agentPos || !exitPos) {
+                statusEl.textContent = 'Por favor, defina a posição do Agente (A) e da Saída (S).';
+                return;
+            }
+            if (isSolving) return;
+            isSolving = true;
+            solveBtn.disabled = true;
+            solveAIBtn.disabled = true;
+            statusEl.textContent = 'A procurar o caminho perfeito...';
+            clearVisualization();
+
+            const queue = [[agentPos]];
+            const visited = new Set([`${agentPos.r},${agentPos.c}`]);
+
+            while (queue.length > 0) {
+                const path = queue.shift();
+                const { r, c } = path[path.length - 1];
+
+                if (r !== agentPos.r || c !== agentPos.c) {
+                    gridContainer.children[r * GRID_SIZE + c].classList.add('visited');
+                    await new Promise(res => setTimeout(res, 5));
+                }
+
+                if (r === exitPos.r && c === exitPos.c) {
+                    statusEl.textContent = `Caminho perfeito encontrado em ${path.length - 1} passos!`;
+                    drawPath(path, 'path');
+                    isSolving = false;
+                    solveBtn.disabled = false;
+                    solveAIBtn.disabled = false;
+                    return;
+                }
+
+                const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+                for (const [dr, dc] of directions) {
+                    const nr = r + dr;
+                    const nc = c + dc;
+                    if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE &&
+                        grid[nr][nc] === 0 && !visited.has(`${nr},${nc}`)) {
+                        visited.add(`${nr},${nc}`);
+                        queue.push([...path, { r: nr, c: nc }]);
+                    }
+                }
+            }
+            statusEl.textContent = 'Não foi encontrado um caminho para a saída.';
+            isSolving = false;
+            solveBtn.disabled = false;
+            solveAIBtn.disabled = false;
+        }
+
+        async function solveWithAI() {
+            if (!agentPos || !exitPos) {
+                statusEl.textContent = 'Por favor, defina a posição do Agente (A) e da Saída (S).';
+                return;
+            }
+            if (isSolving) return;
+            isSolving = true;
+            solveBtn.disabled = true;
+            solveAIBtn.disabled = true;
+            statusEl.textContent = 'A IA está a pensar...';
+            clearVisualization();
+
+            try {
+                const response = await fetch('http://127.0.0.1:5000/solve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ grid, agentPos, exitPos })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Erro do servidor: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                const path = data.path;
+                
+                const finalPos = path[path.length - 1];
+                if (finalPos.r === exitPos.r && finalPos.c === exitPos.c) {
+                    statusEl.textContent = `A IA encontrou o caminho em ${path.length - 1} passos!`;
+                } else {
+                    statusEl.textContent = `A IA tentou, mas não encontrou a saída.`;
+                }
+                
+                drawPath(path, 'ai-path');
+
+            } catch (error) {
+                statusEl.textContent = 'Erro: Não foi possível conectar ao servidor da IA. Verifique se o app.py está em execução.';
+                console.error("Erro ao resolver com IA:", error);
+            } finally {
+                isSolving = false;
+                solveBtn.disabled = false;
+                solveAIBtn.disabled = false;
+            }
+        }
+
+        function drawPath(path, className) {
+            path.forEach(pos => {
+                if ((pos.r === agentPos.r && pos.c === agentPos.c) || (pos.r === exitPos.r && pos.c === exitPos.c)) return;
+                const cell = gridContainer.children[pos.r * GRID_SIZE + pos.c];
+                cell.classList.remove('visited');
+                cell.classList.add(className);
+            });
+        }
+
+        solveBtn.addEventListener('click', solveMaze);
+        solveAIBtn.addEventListener('click', solveWithAI);
+        resetBtn.addEventListener('click', () => {
+            if (isSolving) return;
+            initializeGrid();
+            statusEl.textContent = '';
+        });
+
+        document.addEventListener('keydown', (e) => {
+            switch(e.key.toLowerCase()) {
+                case 'w': toolSelect.value = 'wall'; break;
+                case ' ': toolSelect.value = 'erase'; e.preventDefault(); break;
+                case 'a': toolSelect.value = 'agent'; break;
+                case 's': toolSelect.value = 'exit'; break;
+            }
+        });
+
+        initializeGrid();
+    </script>
+</body>
+</html>
